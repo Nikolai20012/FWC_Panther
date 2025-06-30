@@ -70,7 +70,7 @@ def append_data(camera, date, time, clock, temperature, csv_path):
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ───── Color Palette ────────────────────────────────────────
+# Color Palette
 BG = "#1B3B5A"
 TEXT = "#F0F0F0"
 ACCENT = "#2ECC71"
