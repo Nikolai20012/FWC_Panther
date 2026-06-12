@@ -8,3 +8,9 @@ __pycache__/
 panther_definite_*/
 panther_possible_*/
 Video_Metadata_Extraction.csv
+
+# Tauri / Rust build artifacts
+app/src-tauri/target/
+
+# Local-only Claude Code settings
+.claude/settings.local.json

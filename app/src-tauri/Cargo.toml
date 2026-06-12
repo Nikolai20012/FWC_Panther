@@ -1,0 +1,17 @@
+[package]
+name = "panther-detector"
+version = "0.1.0"
+description = "FWC Panther Detector desktop shell"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+# time 0.3.48 fails to compile (E0119, time-rs/time#783); remove pin once fixed upstream
+time = "=0.3.47"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

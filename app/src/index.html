@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FWC Panther Detector</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ───────────── Sidebar ───────────── -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">🐆</div>
+        <div class="brand-text">
+          <strong>Panther Detector</strong>
+          <span>FWC</span>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <!-- buttons injected by main.js -->
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="status-dot" id="sidecarDot" title="Inference engine status"></div>
+        <span id="sidecarStatus">Connecting…</span>
+      </div>
+    </aside>
+
+    <!-- ───────────── Main content ───────────── -->
+    <main class="content">
+      <header class="topbar">
+        <h1 id="viewTitle">Detect Image</h1>
+        <div class="topbar-actions">
+          <span class="badge" id="modeBadge">MOCK MODE</span>
+        </div>
+      </header>
+
+      <section class="view" id="view">
+        <!-- views injected by main.js -->
+      </section>
+
+      <footer class="logbar">
+        <div class="logbar-head">
+          <span>Activity Log</span>
+          <button class="link-btn" id="clearLog">clear</button>
+        </div>
+        <pre class="log" id="log"></pre>
+      </footer>
+    </main>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>

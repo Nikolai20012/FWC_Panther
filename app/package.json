@@ -1,0 +1,15 @@
+{
+  "name": "panther-detector",
+  "version": "0.1.0",
+  "description": "FWC Panther Detector desktop shell (Tauri v2 + Python sidecar)",
+  "private": true,
+  "scripts": {
+    "preview": "python3 -m http.server 5173 --directory src",
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
