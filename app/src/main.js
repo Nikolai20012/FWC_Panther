@@ -16,6 +16,26 @@ const SIDECAR = "http://127.0.0.1:8756";
 // mock after a failure; the health poll flips it back when the engine is up.
 let USE_MOCK = false;
 
+// Detection thresholds from the Settings tab. That view is rebuilt on every
+// navigation, so the values live here (and in localStorage) rather than in the
+// DOM, and are sent with each Organize run.
+const SETTINGS_KEY = "panther.thresholds";
+const SETTINGS = { definiteConf: 0.6, possibleConf: 0.3 };
+try {
+  Object.assign(SETTINGS, JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"));
+} catch { /* corrupt or unavailable storage — keep the defaults */ }
+
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(SETTINGS)); } catch { /* non-fatal */ }
+}
+
+// Mirrors _classify_bucket in sidecar/server.py — used only for MOCK MODE, since
+// in LIVE mode the server does the bucketing with these same thresholds.
+function bucketFor(conf) {
+  if (conf >= SETTINGS.definiteConf) return "definite";
+  return conf >= SETTINGS.possibleConf ? "possible" : "none";
+}
+
 // ───────────── tiny helpers ─────────────
 const $ = (sel, root = document) => root.querySelector(sel);
 const el = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
@@ -94,13 +114,15 @@ const api = {
 
   // Organizer — classify every video + metadata report CSV (card untouched)
   async organize(path, reportDest, onProgress) {
-    const live = await tryLive("/organize", POST({ src: path, reportDest }));
+    const { definiteConf, possibleConf } = SETTINGS;
+    const live = await tryLive("/organize", POST({ src: path, reportDest, definiteConf, possibleConf }));
     if (live) {
       const job = await this.pollJob(live, onProgress);
       return job.error ? job : { results: job.results, csv: job.dest };
     }
     for (let i = 0; i < MOCK_FILES.length; i++) { await sleep(250); onProgress?.(i + 1, MOCK_FILES.length, MOCK_FILES[i].filename); }
-    return { results: MOCK_FILES };
+    // Re-bucket the fixtures so the sliders visibly do something in MOCK MODE too.
+    return { results: MOCK_FILES.map((f) => ({ ...f, bucket: bucketFor(f.confidence) })) };
   },
 
   // Banner calibration — first frame of the card + saved/drawn field boxes
@@ -331,7 +353,7 @@ function viewOrganizer() {
   const v = el(`<div>
     <div class="card">
       <h2>Organizer — Full Run-Through</h2>
-      <p class="sub">Classifies every video (Definite ≥0.70 / Possible ≥0.30) and extracts metadata in one pass.</p>
+      <p class="sub">Classifies every video (Definite ≥${SETTINGS.definiteConf.toFixed(2)} / Possible ≥${SETTINGS.possibleConf.toFixed(2)}, set in Settings) and extracts metadata in one pass.</p>
       <label class="field"><span>Source (SD card or folder)</span>
         <select id="orgDrive"><option>Loading drives…</option></select></label>
       <label class="field"><span>Save report (CSV) to</span>
@@ -455,8 +477,8 @@ function viewExtract() {
         <input type="text" id="exCam" placeholder="e.g. CSSPI03"></label>
       <label class="field"><span>Processed by</span>
         <input type="text" id="exWho" placeholder="your name (for the log)"></label>
-      <label class="field"><span>Minimum confidence: <b id="exConfVal">0.70</b></span>
-        <input type="range" id="exConf" min="0.3" max="0.95" step="0.05" value="0.70"></label>
+      <label class="field"><span>Minimum confidence: <b id="exConfVal">0.60</b></span>
+        <input type="range" id="exConf" min="0.3" max="0.95" step="0.05" value="0.60"></label>
       <div class="btn-row">
         <button class="btn" id="runExtract">Extract Panther Videos</button>
         <button class="btn ghost" id="exCalib">Calibrate Banner…</button>
@@ -525,10 +547,10 @@ function viewSettings() {
     <div class="card">
       <h2>Detection Thresholds</h2>
       <p class="sub">Confidence cutoffs used to sort videos.</p>
-      <label class="field"><span>Definite ≥ <b id="defVal">0.70</b></span>
-        <input type="range" id="defThresh" min="0" max="1" step="0.05" value="0.70"></label>
-      <label class="field"><span>Possible ≥ <b id="posVal">0.30</b></span>
-        <input type="range" id="posThresh" min="0" max="1" step="0.05" value="0.30"></label>
+      <label class="field"><span>Definite ≥ <b id="defVal">${SETTINGS.definiteConf.toFixed(2)}</b></span>
+        <input type="range" id="defThresh" min="0" max="1" step="0.05" value="${SETTINGS.definiteConf}"></label>
+      <label class="field"><span>Possible ≥ <b id="posVal">${SETTINGS.possibleConf.toFixed(2)}</b></span>
+        <input type="range" id="posThresh" min="0" max="1" step="0.05" value="${SETTINGS.possibleConf}"></label>
     </div>
     <div class="card">
       <h2>Model</h2>
@@ -538,8 +560,26 @@ function viewSettings() {
         <select><option>PyTorch (.pt)</option><option>ONNX Runtime (.onnx) — planned</option></select></label>
     </div>
   </div>`);
-  const bind = (id, out) => { const i = $("#" + id, v), o = $("#" + out, v); i.oninput = () => { o.textContent = (+i.value).toFixed(2); }; };
-  bind("defThresh", "defVal"); bind("posThresh", "posVal");
+  const defI = $("#defThresh", v), posI = $("#posThresh", v);
+  const defO = $("#defVal", v), posO = $("#posVal", v);
+  const render = () => {
+    defI.value = SETTINGS.definiteConf; posI.value = SETTINGS.possibleConf;
+    defO.textContent = SETTINGS.definiteConf.toFixed(2);
+    posO.textContent = SETTINGS.possibleConf.toFixed(2);
+  };
+  // The pair is kept ordered here: the server rejects possible > definite, and
+  // an inverted pair would leave the 'possible' bucket permanently empty anyway.
+  defI.oninput = () => {
+    SETTINGS.definiteConf = +defI.value;
+    if (SETTINGS.possibleConf > SETTINGS.definiteConf) SETTINGS.possibleConf = SETTINGS.definiteConf;
+    saveSettings(); render();
+  };
+  posI.oninput = () => {
+    SETTINGS.possibleConf = +posI.value;
+    if (SETTINGS.definiteConf < SETTINGS.possibleConf) SETTINGS.definiteConf = SETTINGS.possibleConf;
+    saveSettings(); render();
+  };
+  render();
   return v;
 }
 

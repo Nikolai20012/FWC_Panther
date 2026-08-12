@@ -33,7 +33,7 @@ import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import ocr
 import timestamps
@@ -150,12 +150,19 @@ class CalibrationReq(BaseModel):
 class OrganizeReq(BaseModel):
     src: str
     reportDest: str
+    # Settings-tab sliders, previously hardcoded here as 0.7/0.3. The definite
+    # default is now 0.6 to favour false positives over missed cats.
+    definiteConf: float = Field(default=0.6, ge=0.0, le=1.0)
+    possibleConf: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
 class ExtractReq(BaseModel):
     src: str
     dest: str
-    minConf: float = 0.7
+    # Deliberately biased toward false positives: a missed panther is worse than
+    # an extra clip to review, so the cutoff sits below the model's own 0.7-ish
+    # confident band. Raise it in the UI if the review pile gets too noisy.
+    minConf: float = 0.6
     cameraId: str = ""
     processedBy: str = ""
 
@@ -274,11 +281,11 @@ def card_info(src: str):
 
 
 # ───────────────────────── organize (report only) ─────────────────────────
-def _classify_bucket(conf):
-    return "definite" if conf >= 0.7 else ("possible" if conf >= 0.3 else "none")
+def _classify_bucket(conf, definite_conf, possible_conf):
+    return "definite" if conf >= definite_conf else ("possible" if conf >= possible_conf else "none")
 
 
-def _run_organize(job_id, src, report_dest, videos):
+def _run_organize(job_id, src, report_dest, videos, definite_conf, possible_conf):
     results = []
     try:
         os.makedirs(report_dest, exist_ok=True)
@@ -314,7 +321,7 @@ def _run_organize(job_id, src, report_dest, videos):
                 "timestamp": ts.strftime(timestamps.FMT),
                 "clockMatch": clock_match,
                 "confidence": round(conf, 4),
-                "bucket": _classify_bucket(conf),
+                "bucket": _classify_bucket(conf, definite_conf, possible_conf),
                 # meta string keeps the existing results-table UI working
                 "meta": f'{ts.strftime("%Y-%m-%d %H:%M:%S")} | {row["cameraId"] or "?"} | {row["temperature"] if row["temperature"] is not None else "?"}F',
             })
@@ -341,11 +348,16 @@ def organize(req: OrganizeReq):
     report_dest = os.path.expanduser(req.reportDest)
     if not os.path.isdir(src):
         raise HTTPException(404, f"source folder not found: {src}")
+    if req.possibleConf > req.definiteConf:
+        raise HTTPException(400, "possibleConf cannot be above definiteConf — "
+                                 "nothing would ever land in the 'possible' bucket")
     videos = list_videos(src)
     if not videos:
         raise HTTPException(400, f"no videos found in {src}")
     job_id = _new_job(len(videos))
-    threading.Thread(target=_run_organize, args=(job_id, src, report_dest, videos), daemon=True).start()
+    threading.Thread(target=_run_organize,
+                     args=(job_id, src, report_dest, videos,
+                           req.definiteConf, req.possibleConf), daemon=True).start()
     return {"job": job_id, "total": len(videos)}
 
 
