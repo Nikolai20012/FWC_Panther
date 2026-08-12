@@ -52,6 +52,13 @@ And make sure these **are** included: `best.pt`, `sidecar/`, `app/src/`,
 
 ## Step 2 — Run it
 
+Both launchers ship in every copy, but they are **not interchangeable** — run
+the one matching the target OS. A venv puts its interpreter in `bin/` on
+macOS/Linux and `Scripts\` on Windows, so each launcher only knows how to build
+and start its own. Running the macOS script under Git Bash stops with a pointer
+to the Windows one. WSL is Linux as far as this is concerned, so the macOS/Linux
+script is correct there.
+
 ### macOS / Linux
 
 Double-click `macos/Start Panther.command`, or from the project folder:

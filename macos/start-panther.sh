@@ -95,6 +95,23 @@ trap cleanup EXIT INT TERM
 printf '\n%s FWC Panther Detector%s\n' "$C_GREEN" "$C_OFF"
 printf ' %s\n' "$ROOT"
 
+# Git Bash / MSYS / Cygwin are bash on Windows: this script would build a venv
+# with Scripts\ instead of bin/ and then fail confusingly. Send them next door.
+# WSL deliberately isn't caught — it reports Linux, where this path is correct.
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    die "This is the macOS/Linux launcher and you are running it on Windows.
+
+Use the Windows launcher instead — double-click:
+
+    windows\\Start Panther.bat
+
+or, from a PowerShell prompt in the project folder:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\\windows\\Start-Panther.ps1"
+    ;;
+esac
+
 # ─────────────────────────── sanity checks ───────────────────────────
 step 'Checking the folder contents'
 [ -d "$SIDECAR_DIR" ] || die "No 'sidecar' folder found. Copy the whole project folder, not just the macos/ subfolder."
