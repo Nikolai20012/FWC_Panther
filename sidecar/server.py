@@ -374,15 +374,19 @@ def _run_extract(job_id, src, dest, min_conf, camera_id, processed_by, videos):
 
             conf = detector.analyze_video(path)
             hit = conf >= min_conf
-            row = {"filename": rel, "confidence": round(conf, 4), "copied": hit, "newName": None}
+            row = {"filename": rel, "confidence": round(conf, 4), "copied": hit,
+                   "newName": None, "temperature": None}
             if hit:
                 frame = _read_first_frame(path)
                 clock_candidates = None
                 if frame is not None:
                     if boxes is None:
                         boxes = _profile_for(frame) or {}
-                    if "clock" in boxes:
-                        clock_candidates = ocr.read_field(frame, "clock", boxes["clock"])["value"] or []
+                    # One banner pass for both: clock drives the rename, temperature is
+                    # only reported. Fields missing from the profile read back as empty.
+                    readings = _read_banner(frame, boxes, fields=("clock", "temperature"))
+                    clock_candidates = readings.get("clock", {}).get("value") or []
+                    row["temperature"] = readings.get("temperature", {}).get("value")
                 ts, clock_match = timestamps.resolve(path, clock_candidates)
 
                 ext = os.path.splitext(rel)[1].upper()
@@ -399,7 +403,8 @@ def _run_extract(job_id, src, dest, min_conf, camera_id, processed_by, videos):
         run_ts = datetime.datetime.now().strftime(timestamps.FMT)
         csv_path = os.path.join(out_dir, f"extract_{run_ts}.csv")
         with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["filename", "newName", "confidence", "copied"])
+            writer = csv.DictWriter(f, fieldnames=["filename", "newName", "confidence",
+                                                   "copied", "temperature", "clockMatch"])
             writer.writeheader()
             for row in results:
                 writer.writerow({k: row.get(k) for k in writer.fieldnames})
