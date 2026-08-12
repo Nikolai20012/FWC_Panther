@@ -1,0 +1,22 @@
+# Panther Detector sidecar dependencies.
+# Versions pinned to the set verified working on macOS (Python 3.13.5).
+#
+# torch/torchvision: the Windows launcher (windows/Start-Panther.ps1) installs
+# these first from https://download.pytorch.org/whl/cpu so you get the small
+# CPU-only wheels instead of a multi-GB CUDA build. Installing this file on its
+# own is fine too — you just may pull a larger torch.
+
+# web layer
+fastapi==0.136.3
+uvicorn==0.49.0
+pydantic==2.13.4
+
+# vision / model
+numpy==2.4.6
+opencv-python==4.13.0.92
+torch==2.12.0
+torchvision==0.27.0
+ultralytics==8.4.56
+
+# banner OCR
+easyocr==1.7.2
