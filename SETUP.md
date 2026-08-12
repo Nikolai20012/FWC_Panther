@@ -14,13 +14,16 @@ or admin rights.
 ### Option A: Git (preferred)
 
 ```bash
-git clone <remote-url> FWC_Panther
+git clone --branch SummerUpdate https://github.com/Nikolai20012/FWC_Panther.git
 cd FWC_Panther
-git checkout TestClaude
 ```
 
 About 24 MB. `best.pt` (the 6 MB model weights) is tracked, so it comes with the
 clone — nothing to fetch separately.
+
+The repository is public, so this needs no GitHub account, login, or token on
+the target machine — only Git itself installed. If you would rather not install
+Git there at all, use Option B.
 
 ### Option B: A zip file, no Git on the target
 
