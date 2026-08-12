@@ -1,5 +1,5 @@
 <#
-  Panther Detector — one-shot Windows setup + launcher.
+  Panther Detector - one-shot Windows setup + launcher.
 
   First run:  creates venv\, installs every dependency (~10 min, ~2 GB), then starts.
   Later runs: skips straight to starting (~20 s).
@@ -8,7 +8,13 @@
       powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\Start-Panther.ps1
 
   Nothing is installed system-wide except Python itself. Everything else lives
-  in venv\ inside this folder — delete that folder to start over.
+  in venv\ inside this folder - delete that folder to start over.
+
+  KEEP THIS FILE PURE ASCII. Windows PowerShell 5.1 reads a .ps1 with no BOM
+  using the system ANSI codepage, so a UTF-8 dash or quote decodes into a curly
+  quote - which PowerShell accepts as a real string delimiter. One em-dash
+  inside a double-quoted string is enough to end the string early and produce
+  "missing closing '}' in statement block". Use - and ' ' instead.
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -40,14 +46,14 @@ Write-Host ""
 Write-Host " FWC Panther Detector" -ForegroundColor Green
 Write-Host " $Root"
 
-# ─────────────────────────── sanity checks ───────────────────────────
+# --------------------------- sanity checks ---------------------------
 Step 'Checking the folder contents'
 if (-not (Test-Path $SidecarDir)) { Die "No 'sidecar' folder found. Copy the whole project folder, not just the windows\ subfolder." }
 if (-not (Test-Path $UiDir))      { Die "No 'app\src' folder found. The copy looks incomplete." }
 if (-not (Test-Path $Weights))    { Die "Model weights 'best.pt' are missing from $Root. The app cannot detect anything without them." }
 Say 'sidecar, app\src and best.pt are present.'
 
-# ─────────────────────────── find Python ───────────────────────────
+# --------------------------- find Python ---------------------------
 Step 'Looking for Python 3.10-3.13'
 $PyExe = $null
 foreach ($candidate in @('py', 'python3', 'python')) {
@@ -69,10 +75,10 @@ Then close this window, open a new one, and run this script again.
 }
 Say "Using '$PyExe' (Python $PyVer)."
 
-# ─────────────────────────── venv + dependencies ───────────────────────────
+# --------------------------- venv + dependencies ---------------------------
 if ((Test-Path $Venv) -and -not (Test-Path $VenvPy)) {
     Die @"
-There is a 'venv' folder here, but it is not a Windows one — it has no
+There is a 'venv' folder here, but it is not a Windows one - it has no
 Scripts\python.exe. It was almost certainly copied over from the Mac.
 
 Delete it and run this script again:
@@ -83,14 +89,14 @@ Delete it and run this script again:
 
 if (Test-Path $VenvPy) {
     Step 'Dependencies already installed'
-    Say 'Found venv\ — skipping install. Delete that folder to force a clean reinstall.'
+    Say 'Found venv\ - skipping install. Delete that folder to force a clean reinstall.'
 } else {
     Step 'Creating the virtual environment (one time)'
     & $PyExe -m venv $Venv
     if (-not (Test-Path $VenvPy)) { Die "venv creation failed. If Python came from the Microsoft Store, reinstall it from python.org instead." }
     Say 'venv\ created.'
 
-    Step 'Installing dependencies — this downloads ~2 GB, expect 5-15 minutes'
+    Step 'Installing dependencies - this downloads ~2 GB, expect 5-15 minutes'
     Say 'Leave this window open. Progress bars below are pip, not a hang.'
 
     & $VenvPy -m pip install --upgrade pip setuptools wheel
@@ -104,13 +110,13 @@ if (Test-Path $VenvPy) {
     Say ''
     Say 'Step 2 of 2: everything else.'
     & $VenvPy -m pip install -r $Requirements
-    if ($LASTEXITCODE -ne 0) { Die 'Dependency install failed. Scroll up for the first red error — that is the real one.' }
+    if ($LASTEXITCODE -ne 0) { Die 'Dependency install failed. Scroll up for the first red error - that is the real one.' }
 
     Say ''
     Say 'All dependencies installed.'
 }
 
-# ─────────────────────────── start ───────────────────────────
+# --------------------------- start ---------------------------
 $sidecarProc = $null
 $uiProc      = $null
 
@@ -119,7 +125,7 @@ if (Test-Health) {
     Say "Reusing the engine on port $SidecarPort."
 } else {
     Step 'Starting the detection engine'
-    Say 'First start loads the YOLO model — usually 5-20 seconds.'
+    Say 'First start loads the YOLO model - usually 5-20 seconds.'
     $sidecarProc = Start-Process -FilePath $VenvPy -ArgumentList 'server.py', $SidecarPort `
         -WorkingDirectory $SidecarDir -PassThru -WindowStyle Minimized
 
@@ -139,7 +145,7 @@ Step 'Serving the interface'
 $uiProc = Start-Process -FilePath $VenvPy -ArgumentList '-m', 'http.server', $UiPort, '--directory', $UiDir `
     -PassThru -WindowStyle Hidden
 Start-Sleep -Seconds 2
-if ($uiProc.HasExited) { Die "Could not serve the interface on port $UiPort — something else is probably using it." }
+if ($uiProc.HasExited) { Die "Could not serve the interface on port $UiPort - something else is probably using it." }
 Say "http://127.0.0.1:$UiPort"
 
 Start-Process "http://127.0.0.1:$UiPort"
@@ -148,7 +154,7 @@ Write-Host ""
 Write-Host " Running. The browser tab should show a green LIVE badge." -ForegroundColor Green
 Write-Host " If it says MOCK MODE, the interface loaded but the engine is unreachable."
 Write-Host ""
-Write-Host " Windows Firewall may ask about Python — this is a local-only service," -ForegroundColor DarkGray
+Write-Host " Windows Firewall may ask about Python - this is a local-only service," -ForegroundColor DarkGray
 Write-Host " nothing needs network access, so you can safely click Cancel." -ForegroundColor DarkGray
 Write-Host ""
 Read-Host ' Press Enter to shut everything down'
