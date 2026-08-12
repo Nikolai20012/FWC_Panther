@@ -56,24 +56,52 @@ Say 'sidecar, app\src and best.pt are present.'
 # --------------------------- find Python ---------------------------
 Step 'Looking for Python 3.10-3.13'
 $PyExe = $null
-foreach ($candidate in @('py', 'python3', 'python')) {
+$PyArgs = @()
+$PyVer = $null
+
+# Ask for a supported version explicitly before falling back to whatever bare
+# 'python' happens to be. A machine with 3.14 installed alongside 3.13 puts 3.14
+# first on PATH, and probing only bare names would report "no Python found"
+# despite a perfectly good 3.13 sitting right there.
+$candidates = @()
+foreach ($v in @('3.13', '3.12', '3.11', '3.10')) {
+    $candidates += @{ exe = 'py'; pre = @("-$v") }
+}
+foreach ($v in @('313', '312', '311', '310')) {
+    $candidates += @{ exe = "$env:LOCALAPPDATA\Programs\Python\Python$v\python.exe"; pre = @() }
+    $candidates += @{ exe = "$env:ProgramFiles\Python$v\python.exe"; pre = @() }
+}
+foreach ($n in @('py', 'python3', 'python')) {
+    $candidates += @{ exe = $n; pre = @() }
+}
+
+foreach ($c in $candidates) {
+    $pre = $c.pre
     try {
-        $out = & $candidate -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
-        if ($LASTEXITCODE -eq 0 -and $out -match '^3\.(1[0-3])$') { $PyExe = $candidate; $PyVer = $out; break }
+        $out = & $c.exe @pre -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $out -match '^3\.(1[0-3])$') {
+            $PyExe = $c.exe; $PyArgs = $pre; $PyVer = $out; break
+        }
     } catch { }
 }
 if (-not $PyExe) {
     Die @"
-No suitable Python found.
+No suitable Python 3.10-3.13 found.
 
-Install Python 3.12 (64-bit) from https://www.python.org/downloads/windows/
+Install Python 3.13 (64-bit) from https://www.python.org/downloads/windows/
 and TICK "Add python.exe to PATH" on the first screen of the installer.
 Then close this window, open a new one, and run this script again.
 
-(3.14+ is too new for the pinned torch build; 3.9 and older are too old.)
+3.14+ is too new for the pinned torch build; 3.9 and older are too old.
+
+Already installed 3.13 and still seeing this? Check what Windows can see:
+
+    py -0p
+
+If 3.13 is listed there, this script should have found it - send that output.
 "@
 }
-Say "Using '$PyExe' (Python $PyVer)."
+Say "Using '$PyExe $($PyArgs -join ' ')' (Python $PyVer)."
 
 # --------------------------- venv + dependencies ---------------------------
 if ((Test-Path $Venv) -and -not (Test-Path $VenvPy)) {
@@ -92,7 +120,7 @@ if (Test-Path $VenvPy) {
     Say 'Found venv\ - skipping install. Delete that folder to force a clean reinstall.'
 } else {
     Step 'Creating the virtual environment (one time)'
-    & $PyExe -m venv $Venv
+    & $PyExe @PyArgs -m venv $Venv
     if (-not (Test-Path $VenvPy)) { Die "venv creation failed. If Python came from the Microsoft Store, reinstall it from python.org instead." }
     Say 'venv\ created.'
 
