@@ -1,8 +1,26 @@
 venv/
 venv2/
+.venv/
 __pycache__/
 *.pyc
 .DS_Store
+
+# Python virtual environments, matched by CONTENT rather than by directory name.
+# A mangled `python3 -m venv` command once created six venvs named after
+# fragments of an English sentence ("#", "use", "built-in", "explicitly",
+# "macOS's", "Python") and they were committed. Name-based rules cannot
+# anticipate that; these rules make any venv unstageable whatever it is called.
+**/pyvenv.cfg
+**/site-packages/
+**/bin/activate
+**/bin/activate.*
+**/bin/Activate.ps1
+**/bin/pip
+**/bin/pip3
+**/bin/pip3.*
+**/bin/python
+**/bin/python3
+**/bin/python3.*
 
 # Detection output folders (large video files)
 panther_definite_*/
