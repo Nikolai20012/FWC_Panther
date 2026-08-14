@@ -64,6 +64,32 @@ health() {
     | tr -d ' ' | grep -q '"ok":true'
 }
 
+# Version of the code the RUNNING engine loaded; empty if nothing is up.
+engine_version() {
+  local body
+  body=$(curl -fsS --max-time 2 "http://127.0.0.1:$SIDECAR_PORT/health" 2>/dev/null) || return 0
+  local v
+  v=$(printf '%s' "$body" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  # Builds before 0.3.0 answer /health without a version field at all.
+  [ -n "$v" ] && printf '%s' "$v" || printf 'pre-0.3.0'
+}
+
+local_version() {
+  [ -f "$ROOT/VERSION" ] && tr -d '[:space:]' < "$ROOT/VERSION"
+}
+
+# Whoever started it, it has to go: a Python process never reloads source files
+# that changed on disk, so an update needs a fresh one.
+stop_engine_on_port() {
+  local pids
+  pids=$(lsof -ti "tcp:$SIDECAR_PORT" -sTCP:LISTEN 2>/dev/null) || true
+  if [ -n "$pids" ]; then
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    say 'Stopped the old engine.'
+  fi
+}
+
 # Is our own frontend already being served on the UI port? Checking the title
 # distinguishes a leftover run of this script from some unrelated dev server.
 ui_serving() {
@@ -196,9 +222,20 @@ else
 fi
 
 # ─────────────────────────── start ───────────────────────────
+running_version=$(engine_version)
+wanted_version=$(local_version)
+if [ -n "$running_version" ] && [ -n "$wanted_version" ] && \
+   [ "$running_version" != "$wanted_version" ]; then
+  step 'Replacing an out-of-date engine'
+  say "Running engine is $running_version but these files are $wanted_version."
+  say 'A running engine keeps its original code, so it must be restarted to pick up an update.'
+  stop_engine_on_port
+  sleep 2
+fi
+
 if health; then
   step 'Detection engine is already running'
-  say "Reusing the engine on port $SIDECAR_PORT."
+  say "Reusing the engine on port $SIDECAR_PORT (version $running_version)."
 else
   step 'Starting the detection engine'
   say 'First start loads the YOLO model — usually 5-20 seconds.'

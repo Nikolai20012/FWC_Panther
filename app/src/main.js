@@ -11,6 +11,10 @@
 
 const SIDECAR = "http://127.0.0.1:8756";
 
+// Keep in step with the VERSION file at the repo root, which the sidecar reads
+// and reports through /health. The footer compares the two.
+const UI_VERSION = "0.3.0";
+
 // Starts optimistic: every request tries the sidecar first (even in a plain
 // browser, so the preview goes LIVE when the server is running). Flips to
 // mock after a failure; the health poll flips it back when the engine is up.
@@ -612,6 +616,30 @@ function refreshModeBadge() {
   badge.classList.toggle("live", live);
 }
 
+// The interface and the engine are updated together but run separately: the
+// engine keeps whatever code it started with until it is restarted, and the
+// browser can hold a cached copy of this file. Showing both makes a stale half
+// obvious instead of looking like the change never landed.
+function showVersions(engineVersion) {
+  const out = $("#versionLine");
+  if (!out) return;
+  if (!engineVersion) {
+    out.textContent = `UI ${UI_VERSION} · engine offline`;
+    out.classList.remove("mismatch");
+    return;
+  }
+  const stale = engineVersion !== UI_VERSION;
+  out.textContent = stale
+    ? `UI ${UI_VERSION} · engine ${engineVersion} — restart the engine`
+    : `v${UI_VERSION}`;
+  out.classList.toggle("mismatch", stale);
+  if (stale && !showVersions.warned) {
+    showVersions.warned = true;
+    log(`Version mismatch: interface is ${UI_VERSION} but the engine is ${engineVersion}. `
+        + `The engine is still running older code — close the launcher window and start it again.`);
+  }
+}
+
 async function pollSidecar() {
   const dot = $("#sidecarDot"), label = $("#sidecarStatus");
   // Probe directly (not via tryLive) so a sidecar that comes up late still
@@ -628,6 +656,7 @@ async function pollSidecar() {
     dot.className = "status-dot";
     label.textContent = "Sample data";
   }
+  showVersions(h?.version);
   refreshModeBadge();
 }
 
