@@ -13,7 +13,7 @@ const SIDECAR = "http://127.0.0.1:8756";
 
 // Keep in step with the VERSION file at the repo root, which the sidecar reads
 // and reports through /health. The footer compares the two.
-const UI_VERSION = "0.3.0";
+const UI_VERSION = "0.4.0";
 
 // Starts optimistic: every request tries the sidecar first (even in a plain
 // browser, so the preview goes LIVE when the server is running). Flips to

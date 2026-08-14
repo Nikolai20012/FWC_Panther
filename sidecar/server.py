@@ -31,6 +31,7 @@ import shutil
 import sys
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import cv2
 import numpy as np
@@ -140,6 +141,56 @@ def _profile_for(frame):
     return _load_profiles().get(_frame_key(frame), {}).get("boxes")
 
 
+# ───────────────────────── parallel workers ─────────────────────────
+# Batch jobs process several items at once. Torch already parallelises a single
+# inference across cores, so stacking full-width workers on top would only
+# oversubscribe; workers default to half the cores (capped at 4) and torch's
+# intra-op threads are divided among them.
+_TLS = threading.local()
+
+
+def _worker_count():
+    env = os.environ.get("PANTHER_WORKERS")
+    if env and env.isdigit() and int(env) > 0:
+        return int(env)
+    return max(1, min(4, (os.cpu_count() or 2) // 2))
+
+
+def _tune_torch_threads(workers):
+    try:
+        import torch
+        torch.set_num_threads(max(1, (os.cpu_count() or 2) // max(1, workers)))
+    except Exception:
+        pass  # not fatal - just means we keep torch's default fan-out
+
+
+def _worker_detector():
+    """Detector owned by the calling thread.
+
+    Ultralytics models are not documented as safe for concurrent inference, so
+    each worker gets its own. Weights are ~6MB and mmap'd by torch, so the extra
+    copies are cheap next to the throughput they buy.
+    """
+    d = getattr(_TLS, "detector", None)
+    if d is None:
+        d = Detector(detector.model_path)
+        _TLS.detector = d
+    return d
+
+
+def _boxes_for_card(src, items):
+    """Calibration boxes for this card, resolved once from the first readable item.
+
+    Serially this was filled in lazily inside the loop; with workers running
+    concurrently it has to be settled before any of them start.
+    """
+    for rel in items:
+        frame = _read_first_frame(os.path.join(src, rel))
+        if frame is not None:
+            return _profile_for(frame) or {}
+    return {}
+
+
 def _read_banner(frame, boxes, fields=None):
     """OCR the calibrated boxes on one frame → {field: read-result}."""
     out = {}
@@ -206,7 +257,8 @@ class ExtractReq(BaseModel):
 @app.get("/health")
 def health():
     return {"ok": True, "modelLoaded": detector.loaded,
-            "model": os.path.basename(detector.model_path), "version": VERSION}
+            "model": os.path.basename(detector.model_path),
+            "version": VERSION, "workers": _worker_count()}
 
 
 @app.get("/volumes")
@@ -322,15 +374,18 @@ def _classify_bucket(conf, definite_conf, possible_conf):
 
 
 def _run_organize(job_id, src, report_dest, videos, definite_conf, possible_conf):
-    results = []
+    ordered = [None] * len(videos)
     try:
         os.makedirs(report_dest, exist_ok=True)
-        boxes = None
-        moon_dir = None
+        moon_dir = os.path.join(report_dest, "moon_crops")
         frames_dir = os.path.join(report_dest, "first_frames")
-        for i, rel in enumerate(videos, 1):
-            base = os.path.basename(rel)
-            _update_job(job_id, done=i - 1, current=base)
+        boxes = _boxes_for_card(src, videos)
+        workers = min(_worker_count(), len(videos)) or 1
+        _tune_torch_threads(workers)
+        progress = {"done": 0}
+        lock = threading.Lock()
+
+        def classify(i, rel):
             path = os.path.join(src, rel)
             frame = _read_first_frame(path)
 
@@ -347,8 +402,6 @@ def _run_organize(job_id, src, report_dest, videos, definite_conf, possible_conf
                                [cv2.IMWRITE_JPEG_QUALITY, 90]):
                     row["firstFrame"] = os.path.join("first_frames", still)
 
-                if boxes is None:
-                    boxes = _profile_for(frame) or {}
                 readings = _read_banner(frame, boxes)
                 row["cameraId"] = readings.get("cameraId", {}).get("value")
                 row["temperature"] = readings.get("temperature", {}).get("value")
@@ -357,13 +410,11 @@ def _run_organize(job_id, src, report_dest, videos, definite_conf, possible_conf
                 if "moon" in boxes:
                     moon = ocr.crop(frame, boxes["moon"])
                     if moon is not None:
-                        if moon_dir is None:
-                            moon_dir = os.path.join(report_dest, "moon_crops")
-                            os.makedirs(moon_dir, exist_ok=True)
+                        os.makedirs(moon_dir, exist_ok=True)
                         cv2.imwrite(os.path.join(moon_dir, _flat_name(rel) + ".jpg"), moon)
 
             ts, clock_match = timestamps.resolve(path, clock_candidates)
-            conf = detector.analyze_media(path)
+            conf = _worker_detector().analyze_media(path)
             row.update({
                 "timestamp": ts.strftime(timestamps.FMT),
                 "clockMatch": clock_match,
@@ -372,9 +423,22 @@ def _run_organize(job_id, src, report_dest, videos, definite_conf, possible_conf
                 # meta string keeps the existing results-table UI working
                 "meta": f'{ts.strftime("%Y-%m-%d %H:%M:%S")} | {row["cameraId"] or "?"} | {row["temperature"] if row["temperature"] is not None else "?"}F',
             })
-            results.append(row)
-            _update_job(job_id, done=i, results=results)
+            return i, row
 
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(classify, i, rel) for i, rel in enumerate(videos)]
+            for fut in as_completed(futures):
+                i, row = fut.result()
+                ordered[i] = row
+                with lock:
+                    progress["done"] += 1
+                    # Report in card order so the table doesn't jump around as
+                    # workers finish out of sequence.
+                    _update_job(job_id, done=progress["done"],
+                                current=os.path.basename(row["filename"]),
+                                results=[r for r in ordered if r])
+
+        results = [r for r in ordered if r]
         run_ts = datetime.datetime.now().strftime(timestamps.FMT)
         csv_path = os.path.join(report_dest, f"PantherReport_{run_ts}.csv")
         with open(csv_path, "w", newline="") as f:
@@ -409,29 +473,42 @@ def organize(req: OrganizeReq):
 
 
 # ───────────────────────── extract (copy + rename + stills) ─────────────────────────
-def _unique_name(folder, ts_str, camera_id, ext):
-    """Lab convention: YYYY-MM-DD-HH-MM-SS-#_CameraID.ext, # from 0 upward."""
+def _reserve_name(folder, ts_str, camera_id, ext):
+    """Claim a free YYYY-MM-DD-HH-MM-SS-#_CameraID.ext, # from 0 upward.
+
+    The name is reserved by creating the file exclusively rather than by
+    checking os.path.exists first: several workers copy at once, and two clips
+    sharing a banner second would otherwise both pass the check and one would
+    silently overwrite the other. shutil.copy2 truncates the placeholder.
+    """
     n = 0
     while True:
         name = f"{ts_str}-{n}_{camera_id}{ext}"
-        if not os.path.exists(os.path.join(folder, name)):
-            return name
-        n += 1
+        try:
+            fd = os.open(os.path.join(folder, name), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            n += 1
+            continue
+        os.close(fd)
+        return name
 
 
 def _run_extract(job_id, src, dest, min_conf, camera_id, processed_by, videos):
-    copied, results = 0, []
+    ordered = [None] * len(videos)
     try:
         out_dir = os.path.join(dest, camera_id)
         stills_dir = os.path.join(out_dir, "stills")
         os.makedirs(out_dir, exist_ok=True)
-        boxes = None
-        for i, rel in enumerate(videos, 1):
-            base = os.path.basename(rel)
-            _update_job(job_id, done=i - 1, current=base)
+        boxes = _boxes_for_card(src, videos)
+        workers = min(_worker_count(), len(videos)) or 1
+        _tune_torch_threads(workers)
+        progress = {"done": 0, "copied": 0}
+        lock = threading.Lock()
+
+        def pull(i, rel):
             path = os.path.join(src, rel)
 
-            conf = detector.analyze_media(path)
+            conf = _worker_detector().analyze_media(path)
             hit = conf >= min_conf
             row = {"filename": rel, "confidence": round(conf, 4), "copied": hit,
                    "newName": None, "temperature": None}
@@ -439,8 +516,6 @@ def _run_extract(job_id, src, dest, min_conf, camera_id, processed_by, videos):
                 frame = _read_first_frame(path)
                 clock_candidates = None
                 if frame is not None:
-                    if boxes is None:
-                        boxes = _profile_for(frame) or {}
                     # One banner pass for both: clock drives the rename, temperature is
                     # only reported. Fields missing from the profile read back as empty.
                     readings = _read_banner(frame, boxes, fields=("clock", "temperature"))
@@ -449,7 +524,7 @@ def _run_extract(job_id, src, dest, min_conf, camera_id, processed_by, videos):
                 ts, clock_match = timestamps.resolve(path, clock_candidates)
 
                 ext = os.path.splitext(rel)[1].upper()
-                new_name = _unique_name(out_dir, ts.strftime(timestamps.FMT), camera_id, ext)
+                new_name = _reserve_name(out_dir, ts.strftime(timestamps.FMT), camera_id, ext)
                 shutil.copy2(path, os.path.join(out_dir, new_name))
                 # Stills exist so a clip can be eyeballed without opening it. On a
                 # stills-mode card the copied file already is that image, so writing
@@ -458,11 +533,23 @@ def _run_extract(job_id, src, dest, min_conf, camera_id, processed_by, videos):
                     os.makedirs(stills_dir, exist_ok=True)
                     cv2.imwrite(os.path.join(stills_dir, os.path.splitext(new_name)[0] + ".jpg"),
                                 frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-                copied += 1
                 row.update({"newName": new_name, "clockMatch": clock_match})
-            results.append(row)
-            _update_job(job_id, done=i, copied=copied, results=results, dest=out_dir)
+            return i, row
 
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(pull, i, rel) for i, rel in enumerate(videos)]
+            for fut in as_completed(futures):
+                i, row = fut.result()
+                ordered[i] = row
+                with lock:
+                    progress["done"] += 1
+                    progress["copied"] += 1 if row["copied"] else 0
+                    _update_job(job_id, done=progress["done"], copied=progress["copied"],
+                                current=os.path.basename(row["filename"]),
+                                results=[r for r in ordered if r], dest=out_dir)
+
+        results = [r for r in ordered if r]
+        copied = progress["copied"]
         run_ts = datetime.datetime.now().strftime(timestamps.FMT)
         csv_path = os.path.join(out_dir, f"extract_{run_ts}.csv")
         with open(csv_path, "w", newline="") as f:
