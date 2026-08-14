@@ -1,5 +1,9 @@
 # Running the Panther Detector on Windows
 
+For a shorter day-to-day reference — starting, stopping, updating — see
+[`USER_GUIDE.md`](USER_GUIDE.md). This file covers first-time setup and
+troubleshooting.
+
 ## For whoever receives the folder
 
 1. Install **Python 3.12 (64-bit)** from <https://www.python.org/downloads/windows/>.
