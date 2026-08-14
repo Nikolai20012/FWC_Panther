@@ -48,6 +48,25 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8756
 
 PROFILE_PATH = os.path.join(os.path.expanduser("~"), ".panther_detector", "profiles.json")
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read_version():
+    """Version of the code this process actually loaded.
+
+    Reported by /health and shown in the UI. A running engine keeps whatever
+    Python it started with, so after updating the files this is the way to tell
+    whether the engine answering you is the one you just installed.
+    """
+    try:
+        with open(os.path.join(ROOT, "VERSION")) as f:
+            return f.read().strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+VERSION = _read_version()
+
 app = FastAPI(title="Panther Detector Sidecar")
 
 # Local-only service; the webview origin differs per platform (tauri://localhost,
@@ -239,7 +258,7 @@ class ExtractReq(BaseModel):
 def health():
     return {"ok": True, "modelLoaded": detector.loaded,
             "model": os.path.basename(detector.model_path),
-            "workers": _worker_count()}
+            "version": VERSION, "workers": _worker_count()}
 
 
 @app.get("/volumes")

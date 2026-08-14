@@ -42,6 +42,34 @@ function Test-Health {
     } catch { return $false }
 }
 
+function Get-EngineVersion {
+    # Version of the code the RUNNING engine loaded, or $null if none is up.
+    try {
+        $r = Invoke-RestMethod "http://127.0.0.1:$SidecarPort/health" -TimeoutSec 2
+        if ($r.version) { return [string]$r.version }
+        return 'pre-0.3.0'   # older builds predate /health reporting a version
+    } catch { return $null }
+}
+
+function Get-LocalVersion {
+    $f = Join-Path $Root 'VERSION'
+    if (Test-Path $f) { return (Get-Content $f -Raw).Trim() }
+    return $null
+}
+
+function Stop-EngineOnPort {
+    # Whoever started it - this script or an earlier run - it has to go, because
+    # a Python process never reloads source files that changed on disk.
+    try {
+        Get-NetTCPConnection -LocalPort $SidecarPort -State Listen -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique |
+            ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+        Say 'Stopped the old engine.'
+    } catch {
+        Say 'Could not stop the old engine automatically - close its window if the version stays wrong.'
+    }
+}
+
 Write-Host ""
 Write-Host " FWC Panther Detector" -ForegroundColor Green
 Write-Host " $Root"
@@ -148,9 +176,19 @@ if (Test-Path $VenvPy) {
 $sidecarProc = $null
 $uiProc      = $null
 
+$running = Get-EngineVersion
+$wanted = Get-LocalVersion
+if ($running -and $wanted -and $running -ne $wanted) {
+    Step 'Replacing an out-of-date engine'
+    Say "Running engine is $running but these files are $wanted."
+    Say 'A running engine keeps its original code, so it must be restarted to pick up an update.'
+    Stop-EngineOnPort
+    Start-Sleep -Seconds 2
+}
+
 if (Test-Health) {
     Step 'Detection engine is already running'
-    Say "Reusing the engine on port $SidecarPort."
+    Say "Reusing the engine on port $SidecarPort (version $running)."
 } else {
     Step 'Starting the detection engine'
     Say 'First start loads the YOLO model - usually 5-20 seconds.'
