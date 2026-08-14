@@ -139,3 +139,26 @@ npm run tauri dev
 It is not required to use the detector, and it does not yet bundle the Python
 sidecar into a standalone installer — see
 [`IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md) for what that would take.
+
+## Tuning throughput
+
+Organize and Extract process several items at once. By default that is half the
+machine's cores, capped at 4 — enough to saturate the work without fighting the
+inference library, which already spreads a single detection across cores.
+
+Override it if you want to trade memory for speed, or free the machine up:
+
+```bash
+PANTHER_WORKERS=2 python sidecar/server.py 8756
+```
+
+On Windows, set it before launching:
+
+```powershell
+$env:PANTHER_WORKERS = 2
+```
+
+`GET /health` reports the value in effect. Measured on an 8-core Mac over 12
+clips: 1 worker 9.6s, 2 workers 6.6s, 4 workers 5.1s, 8 workers 5.1s — the
+plateau is why the cap is 4. Each worker holds its own model instances, so
+higher counts cost memory for no gain past that point.

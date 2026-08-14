@@ -15,7 +15,7 @@ import cv2
 
 FIELDS = ("cameraId", "temperature", "clock", "moon")
 
-_reader = None
+_tls = threading.local()
 _reader_lock = threading.Lock()
 
 _ALLOWLISTS = {
@@ -26,12 +26,20 @@ _ALLOWLISTS = {
 
 
 def _get_reader():
-    global _reader
-    with _reader_lock:
-        if _reader is None:
-            import easyocr  # deferred: heavy import
-            _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-        return _reader
+    """EasyOCR reader belonging to the calling thread.
+
+    Batch jobs read several items at once and a Reader is not documented as
+    safe to share, so each worker builds its own. That stays cheap because we
+    only ever call recognize(): built with detector=False the reader skips the
+    CRAFT text-detection model, loading in ~0.06s for ~27MB.
+    """
+    reader = getattr(_tls, "reader", None)
+    if reader is None:
+        import easyocr  # deferred: heavy import
+        with _reader_lock:  # serialise construction; first one warms the cache
+            reader = easyocr.Reader(["en"], gpu=False, verbose=False, detector=False)
+        _tls.reader = reader
+    return reader
 
 
 def crop(frame, box):
