@@ -68,3 +68,34 @@ needed after:
 
 - Installing or updating Python
 - Setting an environment variable like `PANTHER_WORKERS` ([`SETUP.md`](../SETUP.md))
+
+## What each tab does
+
+**Home** — shortcut tiles to the other tabs. Nothing runs from here.
+
+**Single Frame Tester** — pick one photo off your computer and run the model
+on it. Shows the box it drew and its confidence. For checking the model on a
+specific image, not for processing a card.
+
+**Organizer** — point it at an SD card or folder. Classifies every video and
+photo, reads the camera ID/temperature/timestamp off the banner if
+calibrated, and writes a report CSV plus a `first_frames` folder with one
+JPEG per item. The card itself is untouched — nothing is copied or renamed.
+Use this to see what's on a card before deciding what to pull off it.
+
+**Extract Panthers** — copies the clips/photos that clear the confidence
+threshold into a folder you choose, renamed
+`YYYY-MM-DD-HH-MM-SS-#_CameraID`, with a CSV manifest. This is the one that
+actually moves files.
+
+**Panther vs Plant** — a guessing game against the model, for spot-checking
+how good it is. Not part of processing a card.
+
+**Settings** — the Definite/Possible confidence sliders that Organizer and
+Extract use to sort results, plus which model weights file is active.
+
+**Calibrate Banner…** — not its own tab; a button inside Organizer and
+Extract. Draw boxes over the camera ID, temperature, date/time, and moon
+icon on a sample frame once per camera model. Saved per resolution and
+reused automatically on every card afterward — you shouldn't need to
+recalibrate unless the banner layout changes.
