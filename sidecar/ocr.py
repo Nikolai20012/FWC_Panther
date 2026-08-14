@@ -69,15 +69,19 @@ def read_field(frame, field, box):
         return {"raw": "", "value": None, "ok": True}
 
     reader = _get_reader()
+    # recognize() rather than readtext(): readtext runs CRAFT text-detection to
+    # find where the words are, but calibration already told us that - the crop
+    # IS the field. Skipping that pass reads the same characters ~6x faster,
+    # which matters because the clock alone is three passes per item.
     if field == "clock":
         candidates, raws = set(), []
         for variant in _clock_variants(img):
-            raw = " ".join(reader.readtext(variant, allowlist=_ALLOWLISTS["clock"], detail=0)).strip()
+            raw = " ".join(reader.recognize(variant, allowlist=_ALLOWLISTS["clock"], detail=0)).strip()
             raws.append(raw)
             candidates.update(_clock_candidates(raw))
         return {"raw": raws[0] if raws else "", "value": sorted(candidates), "ok": bool(candidates)}
 
-    results = reader.readtext(_prep(img), allowlist=_ALLOWLISTS.get(field), detail=0)
+    results = reader.recognize(_prep(img), allowlist=_ALLOWLISTS.get(field), detail=0)
     raw = " ".join(results).strip()
     value, ok = _parse(field, raw)
     return {"raw": raw, "value": value, "ok": ok}
