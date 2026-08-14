@@ -425,7 +425,7 @@ def _run_organize(job_id, src, report_dest, videos, definite_conf, possible_conf
         with open(csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=[
                 "filename", "timestamp", "cameraId", "temperature",
-                "clockMatch", "confidence", "bucket", "firstFrame"])
+                "confidence", "bucket", "firstFrame"])
             writer.writeheader()
             for row in results:
                 writer.writerow({k: row[k] for k in writer.fieldnames})
@@ -535,7 +535,7 @@ def _run_extract(job_id, src, dest, min_conf, camera_id, processed_by, videos):
         csv_path = os.path.join(out_dir, f"extract_{run_ts}.csv")
         with open(csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=["filename", "newName", "confidence",
-                                                   "copied", "temperature", "clockMatch"])
+                                                   "copied", "temperature"])
             writer.writeheader()
             for row in results:
                 writer.writerow({k: row.get(k) for k in writer.fieldnames})
