@@ -112,7 +112,7 @@ const api = {
     }
   },
 
-  // Organizer — classify every video + metadata report CSV (card untouched)
+  // Organizer — classify every video/photo + metadata report CSV (card untouched)
   async organize(path, reportDest, onProgress) {
     const { definiteConf, possibleConf } = SETTINGS;
     const live = await tryLive("/organize", POST({ src: path, reportDest, definiteConf, possibleConf }));
@@ -267,9 +267,9 @@ const FEATURES = [
 // The four main-screen actions (subset of FEATURES, in display order)
 const MAIN_ACTIONS = [
   { id: "frame",     icon: "🖼️", title: "Single Frame Tester", desc: "Run the model on one image and preview the detection box + confidence." },
-  { id: "organizer", icon: "🗂️", title: "Organizer",           desc: "Full run-through: classify every video on the card and extract its metadata." },
+  { id: "organizer", icon: "🗂️", title: "Organizer",           desc: "Full run-through: classify every video or photo on the card and extract its metadata." },
   { id: "game",      icon: "🐆", title: "Panther vs Plant",    desc: "Play-test the model — you guess, it reveals its call, disagreements get flagged." },
-  { id: "extract",   icon: "📤", title: "Extract Panthers",    desc: "Copy the confirmed panther videos off the SD card into a folder you choose." },
+  { id: "extract",   icon: "📤", title: "Extract Panthers",    desc: "Copy the confirmed panther videos or photos off the SD card into a folder you choose." },
 ];
 
 // ───────────── HOME ─────────────
@@ -353,7 +353,7 @@ function viewOrganizer() {
   const v = el(`<div>
     <div class="card">
       <h2>Organizer — Full Run-Through</h2>
-      <p class="sub">Classifies every video (Definite ≥${SETTINGS.definiteConf.toFixed(2)} / Possible ≥${SETTINGS.possibleConf.toFixed(2)}, set in Settings) and extracts metadata in one pass.</p>
+      <p class="sub">Classifies every video and photo (Definite ≥${SETTINGS.definiteConf.toFixed(2)} / Possible ≥${SETTINGS.possibleConf.toFixed(2)}, set in Settings) and extracts metadata in one pass, saving a first-frame JPEG of each into a first_frames folder next to the CSV.</p>
       <label class="field"><span>Source (SD card or folder)</span>
         <select id="orgDrive"><option>Loading drives…</option></select></label>
       <label class="field"><span>Save report (CSV) to</span>
@@ -468,7 +468,7 @@ function viewExtract() {
   const v = el(`<div>
     <div class="card">
       <h2>Extract Panthers to Folder</h2>
-      <p class="sub">Copies the confirmed panther videos off the SD card, renamed YYYY-MM-DD-HH-MM-SS-#_CameraID, with first-frame stills and a CSV manifest. Originals on the card are left untouched.</p>
+      <p class="sub">Copies the confirmed panther videos or photos off the SD card, renamed YYYY-MM-DD-HH-MM-SS-#_CameraID, with a CSV manifest (clips also get first-frame stills). Originals on the card are left untouched.</p>
       <label class="field"><span>From (SD card)</span>
         <select id="exDrive"><option>Loading drives…</option></select></label>
       <label class="field"><span>To (destination folder)</span>
@@ -480,7 +480,7 @@ function viewExtract() {
       <label class="field"><span>Minimum confidence: <b id="exConfVal">0.60</b></span>
         <input type="range" id="exConf" min="0.3" max="0.95" step="0.05" value="0.60"></label>
       <div class="btn-row">
-        <button class="btn" id="runExtract">Extract Panther Videos</button>
+        <button class="btn" id="runExtract">Extract Panther Files</button>
         <button class="btn ghost" id="exCalib">Calibrate Banner…</button>
         <button class="btn ghost" id="exRefresh">Refresh Drives</button>
       </div>
@@ -533,7 +533,7 @@ function viewExtract() {
       log(`Extract: failed — ${res.error}`);
     } else {
       $("#exDone", v).className = "verdict good";
-      $("#exDone", v).innerHTML = `<strong>✓ Done</strong> — copied ${res.copied} panther video(s) to <b>${res.dest ?? dest}</b>.`;
+      $("#exDone", v).innerHTML = `<strong>✓ Done</strong> — copied ${res.copied} panther file(s) to <b>${res.dest ?? dest}</b>.`;
       log(`Extract: copied ${res.copied} file(s).`);
     }
   };
@@ -546,7 +546,7 @@ function viewSettings() {
   const v = el(`<div>
     <div class="card">
       <h2>Detection Thresholds</h2>
-      <p class="sub">Confidence cutoffs used to sort videos.</p>
+      <p class="sub">Confidence cutoffs used to sort videos and photos.</p>
       <label class="field"><span>Definite ≥ <b id="defVal">${SETTINGS.definiteConf.toFixed(2)}</b></span>
         <input type="range" id="defThresh" min="0" max="1" step="0.05" value="${SETTINGS.definiteConf}"></label>
       <label class="field"><span>Possible ≥ <b id="posVal">${SETTINGS.possibleConf.toFixed(2)}</b></span>

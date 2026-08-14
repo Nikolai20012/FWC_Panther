@@ -19,9 +19,18 @@ def _default_model_path():
 
 
 VIDEO_EXTS = (".mp4", ".avi", ".mov", ".mkv")
+# Some trail cams are set to stills rather than clips, so a card may hold JPEGs
+# instead of (or alongside) videos. Everything downstream treats an image as a
+# one-frame video.
+IMAGE_EXTS = (".jpg", ".jpeg", ".png")
+MEDIA_EXTS = VIDEO_EXTS + IMAGE_EXTS
 
 # Video timestamps (ms) sampled when classifying a clip
 SAMPLE_TIMES_MS = (1000, 3000, 5000)
+
+
+def is_image(path):
+    return path.lower().endswith(IMAGE_EXTS)
 
 
 class Detector:
@@ -68,6 +77,18 @@ class Detector:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         return out
 
+    def analyze_media(self, path):
+        """Best panther confidence for a clip or a still (0.0 if unreadable)."""
+        return self.analyze_image(path) if is_image(path) else self.analyze_video(path)
+
+    def analyze_image(self, path):
+        """Best panther confidence in a single still (0.0 if unreadable)."""
+        frame = cv2.imread(path)
+        if frame is None:
+            return 0.0
+        return max((d["conf"] for d in self.detect_frame(frame) if d["label"] == "panther"),
+                   default=0.0)
+
     def analyze_video(self, path):
         """Best panther confidence across sampled frames (0.0 if unreadable)."""
         cap = cv2.VideoCapture(path)
@@ -88,12 +109,13 @@ class Detector:
         return best
 
 
-def list_videos(folder, max_depth=4):
-    """Video files under `folder`, recursive, as paths relative to `folder`.
+def list_media(folder, max_depth=4):
+    """Video and image files under `folder`, as paths relative to `folder`.
 
     Trail-cam cards nest clips (e.g. DCIM/100_BTCF/IMG_0001.AVI), so the user
     can pick the card root and we find them. Depth-limited so pointing this at
-    a huge drive doesn't walk the whole filesystem.
+    a huge drive doesn't walk the whole filesystem. Stills-mode cards hold
+    JPEGs in the same layout, so both are collected and sorted together.
     """
     folder = os.path.abspath(folder)
     base_depth = folder.rstrip(os.sep).count(os.sep)
@@ -103,6 +125,6 @@ def list_videos(folder, max_depth=4):
                    if not d.startswith(".") and d != "System Volume Information"
                    and root.count(os.sep) - base_depth < max_depth]
         for f in files:
-            if f.lower().endswith(VIDEO_EXTS) and not f.startswith("."):
+            if f.lower().endswith(MEDIA_EXTS) and not f.startswith("."):
                 videos.append(os.path.relpath(os.path.join(root, f), folder))
     return sorted(videos)

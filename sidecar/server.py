@@ -12,8 +12,12 @@ Serves the frontend contract defined in app/src/main.js on 127.0.0.1:8756:
   POST /extract            → {job}  copy/rename panther hits + stills + CSV
   GET  /jobs/{id}          → job progress
 
-The SD card is always read-only: organize writes only a report CSV elsewhere;
-extract copies hits into the destination, renamed YYYY-MM-DD-HH-MM-SS-#_CamID.
+Cards may hold clips or stills; an image is treated as a one-frame video, so
+both run through the same detection, banner OCR and timestamp path.
+
+The SD card is always read-only: organize writes only a report CSV elsewhere,
+plus a first_frames/ JPEG per item; extract copies hits into the destination,
+renamed YYYY-MM-DD-HH-MM-SS-#_CamID.
 
 Run:  python server.py [port]
 """
@@ -37,7 +41,7 @@ from pydantic import BaseModel, Field
 
 import ocr
 import timestamps
-from detector import Detector, list_videos
+from detector import Detector, is_image, list_media
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8756
 
@@ -80,16 +84,28 @@ def _save_profile(key, boxes):
 
 
 def _read_first_frame(path):
+    """First frame of a clip, or the still itself on a stills-mode card."""
+    if is_image(path):
+        return cv2.imread(path)  # None if unreadable, same contract as below
     cap = cv2.VideoCapture(path)
     ret, frame = cap.read()
     cap.release()
     return frame if ret else None
 
 
+def _flat_name(rel):
+    """Relative path flattened into one filename.
+
+    Cards nest clips under DCIM/100_BTCF/, DCIM/101_BTCF/... and restart their
+    numbering in each folder, so basenames alone collide and silently overwrite.
+    """
+    return os.path.splitext(rel)[0].replace("\\", "_").replace("/", "_")
+
+
 def _first_frame(src):
-    """(relpath, frame) of the first readable video under src."""
+    """(relpath, frame) of the first readable video or still under src."""
     src = os.path.expanduser(src)
-    for rel in list_videos(src):
+    for rel in list_media(src):
         frame = _read_first_frame(os.path.join(src, rel))
         if frame is not None:
             return rel, frame
@@ -235,7 +251,7 @@ def detect(req: DetectReq):
 def calibration_frame(src: str):
     rel, frame = _first_frame(src)
     if frame is None:
-        raise HTTPException(404, f"no readable videos under {src}")
+        raise HTTPException(404, f"no readable videos or images under {src}")
     h, w = frame.shape[:2]
     return {
         "video": rel,
@@ -253,7 +269,7 @@ def save_calibration(req: CalibrationReq):
         raise HTTPException(400, f"unknown fields: {bad}")
     rel, frame = _first_frame(req.src)
     if frame is None:
-        raise HTTPException(404, f"no readable videos under {req.src}")
+        raise HTTPException(404, f"no readable videos or images under {req.src}")
     _save_profile(_frame_key(frame), req.boxes)
     readings = _read_banner(frame, req.boxes)
     return {
@@ -268,7 +284,7 @@ def save_calibration(req: CalibrationReq):
 def card_info(src: str):
     rel, frame = _first_frame(src)
     if frame is None:
-        raise HTTPException(404, f"no readable videos under {src}")
+        raise HTTPException(404, f"no readable videos or images under {src}")
     boxes = _profile_for(frame)
     if not boxes:
         return {"hasProfile": False}
@@ -291,15 +307,26 @@ def _run_organize(job_id, src, report_dest, videos, definite_conf, possible_conf
         os.makedirs(report_dest, exist_ok=True)
         boxes = None
         moon_dir = None
+        frames_dir = os.path.join(report_dest, "first_frames")
         for i, rel in enumerate(videos, 1):
             base = os.path.basename(rel)
             _update_job(job_id, done=i - 1, current=base)
             path = os.path.join(src, rel)
             frame = _read_first_frame(path)
 
-            row = {"filename": rel, "cameraId": None, "temperature": None}
+            row = {"filename": rel, "cameraId": None, "temperature": None,
+                   "firstFrame": None}
             clock_candidates = None
             if frame is not None:
+                # A contact sheet of the whole card: one JPEG per item, written
+                # for every file rather than just the hits, so the report can be
+                # reviewed without opening a single clip.
+                os.makedirs(frames_dir, exist_ok=True)
+                still = _flat_name(rel) + ".jpg"
+                if cv2.imwrite(os.path.join(frames_dir, still), frame,
+                               [cv2.IMWRITE_JPEG_QUALITY, 90]):
+                    row["firstFrame"] = os.path.join("first_frames", still)
+
                 if boxes is None:
                     boxes = _profile_for(frame) or {}
                 readings = _read_banner(frame, boxes)
@@ -313,10 +340,10 @@ def _run_organize(job_id, src, report_dest, videos, definite_conf, possible_conf
                         if moon_dir is None:
                             moon_dir = os.path.join(report_dest, "moon_crops")
                             os.makedirs(moon_dir, exist_ok=True)
-                        cv2.imwrite(os.path.join(moon_dir, os.path.splitext(base)[0] + ".jpg"), moon)
+                        cv2.imwrite(os.path.join(moon_dir, _flat_name(rel) + ".jpg"), moon)
 
             ts, clock_match = timestamps.resolve(path, clock_candidates)
-            conf = detector.analyze_video(path)
+            conf = detector.analyze_media(path)
             row.update({
                 "timestamp": ts.strftime(timestamps.FMT),
                 "clockMatch": clock_match,
@@ -333,7 +360,7 @@ def _run_organize(job_id, src, report_dest, videos, definite_conf, possible_conf
         with open(csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=[
                 "filename", "timestamp", "cameraId", "temperature",
-                "clockMatch", "confidence", "bucket"])
+                "clockMatch", "confidence", "bucket", "firstFrame"])
             writer.writeheader()
             for row in results:
                 writer.writerow({k: row[k] for k in writer.fieldnames})
@@ -351,9 +378,9 @@ def organize(req: OrganizeReq):
     if req.possibleConf > req.definiteConf:
         raise HTTPException(400, "possibleConf cannot be above definiteConf — "
                                  "nothing would ever land in the 'possible' bucket")
-    videos = list_videos(src)
+    videos = list_media(src)
     if not videos:
-        raise HTTPException(400, f"no videos found in {src}")
+        raise HTTPException(400, f"no videos or images found in {src}")
     job_id = _new_job(len(videos))
     threading.Thread(target=_run_organize,
                      args=(job_id, src, report_dest, videos,
@@ -377,14 +404,14 @@ def _run_extract(job_id, src, dest, min_conf, camera_id, processed_by, videos):
     try:
         out_dir = os.path.join(dest, camera_id)
         stills_dir = os.path.join(out_dir, "stills")
-        os.makedirs(stills_dir, exist_ok=True)
+        os.makedirs(out_dir, exist_ok=True)
         boxes = None
         for i, rel in enumerate(videos, 1):
             base = os.path.basename(rel)
             _update_job(job_id, done=i - 1, current=base)
             path = os.path.join(src, rel)
 
-            conf = detector.analyze_video(path)
+            conf = detector.analyze_media(path)
             hit = conf >= min_conf
             row = {"filename": rel, "confidence": round(conf, 4), "copied": hit,
                    "newName": None, "temperature": None}
@@ -404,7 +431,11 @@ def _run_extract(job_id, src, dest, min_conf, camera_id, processed_by, videos):
                 ext = os.path.splitext(rel)[1].upper()
                 new_name = _unique_name(out_dir, ts.strftime(timestamps.FMT), camera_id, ext)
                 shutil.copy2(path, os.path.join(out_dir, new_name))
-                if frame is not None:
+                # Stills exist so a clip can be eyeballed without opening it. On a
+                # stills-mode card the copied file already is that image, so writing
+                # one would just duplicate every hit at a lower quality.
+                if frame is not None and not is_image(path):
+                    os.makedirs(stills_dir, exist_ok=True)
                     cv2.imwrite(os.path.join(stills_dir, os.path.splitext(new_name)[0] + ".jpg"),
                                 frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 copied += 1
@@ -437,9 +468,9 @@ def extract(req: ExtractReq):
     camera_id = req.cameraId.strip().upper()
     if not camera_id or not camera_id.isalnum():
         raise HTTPException(400, "camera ID is required (letters and digits only)")
-    videos = list_videos(src)
+    videos = list_media(src)
     if not videos:
-        raise HTTPException(400, f"no videos found in {src}")
+        raise HTTPException(400, f"no videos or images found in {src}")
     job_id = _new_job(len(videos))
     threading.Thread(
         target=_run_extract,
