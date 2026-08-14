@@ -1,8 +1,47 @@
 # FWC Panther Detector — Windows User Guide
 
-Day-to-day reference: starting it, stopping it, updating it. First-time setup
-and troubleshooting live in [`README.md`](README.md) — this is the short version
-for regular use.
+## First-time setup (a brand-new computer, once)
+
+Open PowerShell and run these in order.
+
+**1. Install Git**
+
+```powershell
+winget install --id Git.Git -e --source winget
+```
+
+**2. Install Python 3.13** — two commands, one at a time:
+
+```powershell
+curl.exe -L -o "$env:TEMP\python-3.13.13-amd64.exe" https://www.python.org/ftp/python/3.13.13/python-3.13.13-amd64.exe
+```
+
+```powershell
+& "$env:TEMP\python-3.13.13-amd64.exe" /passive InstallAllUsers=0 InstallLauncherAllUsers=0 PrependPath=1 Include_launcher=1
+```
+
+**3. Close this PowerShell window and open a new one.** The window Python was
+just installed from doesn't know it's on PATH yet — only a window opened
+*after* the install does.
+
+**4. Download and start the project**, from the new window:
+
+```powershell
+cd ~
+git clone --branch SummerUpdate https://github.com/Nikolai20012/FWC_Panther.git
+cd FWC_Panther
+powershell -NoProfile -ExecutionPolicy Bypass -File .\windows\Start-Panther.ps1
+```
+
+That last command is also how you start it from now on (see **Start the app**
+below) — this first run additionally installs everything else the project
+needs.
+
+---
+
+Everything past this point is for a computer that already has the project on
+it. First-time setup and troubleshooting also live in
+[`README.md`](README.md).
 
 ## Start the app
 
